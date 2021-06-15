@@ -1,15 +1,17 @@
 // MIT/Apache2 License
 
-use super::{Controller, Error, ThreadState};
+use super::{BreadThread, Controller, Error, ThreadState};
 use orphan_crippler::Receiver;
 use std::{
     any::Any,
     marker::PhantomData,
-    sync::{Arc, Weak},
+    sync::{mpsc, Arc, Weak},
     thread::{self, ThreadId},
 };
 
 /// A handle to the bread thread that can be sent between threads.
+#[derive(Clone)]
+#[repr(transparent)]
 pub struct ThreadHandle<'evh, Ctrl: Controller> {
     state: Weak<ThreadState<'evh, Ctrl>>,
 }
@@ -58,6 +60,30 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
             thread_id: thread::current().id(),
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<Ctrl: Controller + Send + 'static> ThreadHandle<'static, Ctrl> {
+    /// Initialize a new `BreadThread` in newly spawned thread, then clone a handle to that thread.
+    #[inline]
+    pub fn in_foreign_thread(controller: Ctrl) -> ThreadHandle<'static, Ctrl> {
+        // initialize a channel to send the thread handle back from the thread
+        let (sender, receiver) = mpsc::channel::<ThreadHandle<'static, Ctrl>>();
+        thread::Builder::new()
+            .name("bread-thread".to_string())
+            .spawn(move || {
+                let bt = BreadThread::new(controller);
+                let th = bt.handle();
+                sender
+                    .send(th)
+                    .expect("Receiver shouldn't have closed down already");
+                bt.main_loop()
+                    .unwrap_or_else(|_| panic!("Main loop failed"));
+            })
+            .expect("Unable to create foreign thread");
+        receiver
+            .recv()
+            .expect("Sender shouldn't close down without sending")
     }
 }
 

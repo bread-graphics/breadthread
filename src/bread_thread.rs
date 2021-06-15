@@ -2,7 +2,13 @@
 
 use super::{Controller, Error, ThreadHandle, ThreadState};
 use orphan_crippler::Receiver;
-use std::{any::Any, marker::PhantomData, sync::Arc};
+use std::{any::Any, cell::Cell, marker::PhantomData, sync::Arc, thread_local};
+
+thread_local! {
+    /// There cannot be more than one `BreadThread` per thread. This indicates if this thread is currently a
+    /// bread thread.
+    static IS_BREAD_THREAD: Cell<bool> = Cell::new(false);
+}
 
 /// The object representing the bread thread. The thread this object is created in is the bread thread, and it
 /// cannot be moved out of the bread thread.
@@ -17,13 +23,31 @@ pub struct BreadThread<'evh, Ctrl: Controller> {
 }
 
 impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
-    /// Create a new `BreadThread` from a controller.
+    /// Create a new `BreadThread` from a controller. This function returns an error if the thread is already a
+    /// bread thread.
+    #[inline]
+    pub fn try_new(controller: Ctrl) -> Result<Self, Error<Ctrl::Error>> {
+        if let Err(e) = IS_BREAD_THREAD.with(|ibt| {
+            if ibt.replace(true) {
+                Err(Error::AlreadyABreadThread)
+            } else {
+                Ok(())
+            }
+        }) {
+            Err(e)
+        } else {
+            Ok(Self {
+                state: Arc::new(ThreadState::new(controller)),
+                _phantom: PhantomData,
+            })
+        }
+    }
+
+    /// Create a new `BreadThread` from a controller. This function panics an error if the thread is already a
+    /// bread thread.
     #[inline]
     pub fn new(controller: Ctrl) -> Self {
-        Self {
-            state: Arc::new(ThreadState::new(controller)),
-            _phantom: PhantomData,
-        }
+        Self::try_new(controller).unwrap_or_else(|_| panic!("Thread is already a bread thread"))
     }
 
     /// Send a directive to the thread's controller.
@@ -61,5 +85,12 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     pub fn handle(&self) -> ThreadHandle<'evh, Ctrl> {
         self.state.init_directive_channel();
         ThreadHandle::from_weak(Arc::downgrade(&self.state))
+    }
+}
+
+impl<'evh, Ctrl: Controller> Drop for BreadThread<'evh, Ctrl> {
+    #[inline]
+    fn drop(&mut self) {
+        let _ = IS_BREAD_THREAD.try_with(|ibt| ibt.set(false));
     }
 }
