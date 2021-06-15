@@ -1,0 +1,19 @@
+[package]
+name = "breadthread"
+version = "0.1.0"
+authors = ["notgull <jtnunley01@gmail.com>"]
+edition = "2018"
+description = "GUI abstraction; adds a thread controller that helps get some bread"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/notgull/breadthread"
+homepage = "https://github.com/notgull/breadthread#readme"
+
+[dependencies]
+cfg-if = "1"
+flume = { version = "0.10", default-features = false }
+parking_lot = { version = "0.11.1", optional = true }
+once_cell = { version = "1.8" }
+orphan-crippler = "0.1"
+
+[features]
+pl = ["parking_lot", "once_cell/parking_lot", "orphan-crippler/parking_lot"]
