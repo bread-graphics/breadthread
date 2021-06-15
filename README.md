@@ -1,6 +1,6 @@
 # breadthread
 
-[![Build Status](https://dev.azure.com/jtnunley01/gui-tools/_apis/build/status/notgull.breadthread?branchName=master)](https://dev.azure.com/jtnunley01/gui-tools/_build/latest?definitionId=17&branchName=master) 
+[![Build Status](https://dev.azure.com/jtnunley01/gui-tools/_apis/build/status/notgull.breadthread?branchName=master)](https://dev.azure.com/jtnunley01/gui-tools/_build/latest?definitionId=17&branchName=master) [![crates.io](https://img.shields.io/crates/d/breadthread)](https://crates.io/crates/breadthread) [![docs.rs](https://docs.rs/breadthread/badge.svg)](https://docs.rs/breadthread) 
 
 The APIs of most system-specific GUI frameworks operate on the following principles:
 
