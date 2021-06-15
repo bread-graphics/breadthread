@@ -17,6 +17,25 @@ pub struct ThreadHandle<'evh, Ctrl: Controller> {
 }
 
 impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
+    /// The `ThreadHandle` is represented internally as a pointer. This converts the `ThreadHandle` to that
+    /// pointer. In order to safely deallocate the memory, this pointer needs to be converted back into a
+    /// `ThreadHandle` using the [`from_ptr`] function.
+    #[must_use = "If the pointer isn't put into from_raw, memory may not properly deallocate"]
+    #[inline]
+    pub fn into_raw(self) -> *const () {
+        self.state.into_raw().cast()
+    }
+
+    /// Converts a raw pointer into a `ThreadHandle`.
+    /// 
+    /// # Safety
+    /// 
+    /// If this pointer was not created via the [`into_raw`] function, undefined behavior may occur.
+    #[inline]
+    pub unsafe fn from_raw(ptr: *const ()) -> Self {
+        Self { state: Weak::from_raw(ptr.cast()) }
+    }
+
     #[inline]
     fn state(&self) -> Result<Arc<ThreadState<'evh, Ctrl>>, Error<Ctrl::Error>> {
         match self.state.upgrade() {
@@ -51,6 +70,18 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
         state.set_event_handler(event_handler);
         Ok(())
     }
+
+    /// Use a closure with the controller, if we are on the bread thread.
+    #[inline]
+    pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
+        let state = self.state()?;
+        if thread::current().id() == state.bread_thread_id() {
+            // SAFETY: we are on the bread thread
+            Ok(unsafe { state.with(f) })
+        } else {
+            Err(Error::NotInBreadThread)
+        }
+    } 
 
     /// Pin this thread handle to a thread.
     #[inline]
@@ -116,6 +147,18 @@ impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
     ) -> Result<(), Error<Ctrl::Error>> {
         self.inner.set_event_handler(event_handler)
     }
+
+    /// Use a closure with the controller, if we are on the bread thread.
+    #[inline]
+    pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
+        let state = self.inner.state()?;
+        if self.thread_id == state.bread_thread_id() {
+            // SAFETY: we are on the bread thread
+            Ok(unsafe { state.with(f) })
+        } else {
+            Err(Error::NotInBreadThread)
+        }
+    } 
 
     /// Unpin this thread handle.
     #[inline]

@@ -75,6 +75,26 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         }
     }
 
+    /// Use the inner controller in a closure.
+    /// 
+    /// # Safety
+    /// 
+    /// Assumes we are in the bread thread.
+    #[inline]
+    pub(crate) unsafe fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> T {
+        f(&self.controller.borrow())
+    }
+
+    /// Use the inner controller in a closure, mutably.
+    /// 
+    /// # Safety
+    /// 
+    /// Assumes we are in the bread thread.
+    #[inline]
+    pub(crate) unsafe fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(&self, f: F) -> T {
+        f(&mut self.controller.borrow_mut())
+    }
+
     /// Get the bread thread's ID.
     #[inline]
     pub(crate) fn bread_thread_id(&self) -> ThreadId {

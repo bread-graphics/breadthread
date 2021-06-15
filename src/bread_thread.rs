@@ -50,6 +50,20 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
         Self::try_new(controller).unwrap_or_else(|_| panic!("Thread is already a bread thread"))
     }
 
+    /// Use the controller in a closure.
+    #[inline]
+    pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> T {
+        // SAFETY: we are guaranteed to be in the bread thread
+        unsafe { self.state.with(f) }
+    }
+
+    /// Use the controller in a mutable closure.
+    #[inline]
+    pub fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(&mut self, f: F) -> T {
+        // SAFETY: as above so below
+        unsafe { self.state.with_mut(f) }
+    }
+
     /// Send a directive to the thread's controller.
     #[inline]
     pub fn send_directive<T: Any + Send>(

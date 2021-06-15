@@ -61,6 +61,8 @@ pub enum Error<InnerError> {
     UnableToComplete,
     /// Attempted to turn a thread that was already a bread thread into a bread thread.
     AlreadyABreadThread,
+    /// We are not in the bread thread.
+    NotInBreadThread,
     /// A controller-associated error has occurred.
     Controller(InnerError),
 }
@@ -86,6 +88,7 @@ impl<InnerError: fmt::Display> fmt::Display for Error<InnerError> {
             Error::Closed => f.write_str("The bread thread is closed and cannot be used"),
             Error::UnableToComplete => f.write_str("The controller did not complete the directive"),
             Error::AlreadyABreadThread => f.write_str("This thread is already a bread thread"),
+            Error::NotInBreadThread => f.write_str("This thread is not the bread thread"),
             Error::Controller(inner) => fmt::Display::fmt(inner, f),
         }
     }
