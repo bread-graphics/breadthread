@@ -1,5 +1,7 @@
 # breadthread
 
+[![Build Status](https://dev.azure.com/jtnunley01/gui-tools/_apis/build/status/notgull.breadthread?branchName=master)](https://dev.azure.com/jtnunley01/gui-tools/_build/latest?definitionId=17&branchName=master) 
+
 The APIs of most system-specific GUI frameworks operate on the following principles:
 
 * Primitives are represented by pointers to system objects that are not thread safe.
