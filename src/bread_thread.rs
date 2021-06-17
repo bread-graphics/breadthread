@@ -67,7 +67,7 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     /// Send a directive to the thread's controller.
     #[inline]
     pub fn send_directive<T: Any + Send>(
-        &mut self,
+        &self,
         directive: Ctrl::Directive,
     ) -> Result<Receiver<T>, Error<Ctrl::Error>> {
         // SAFETY: since this is !send, we know we're in the bread thread
@@ -79,11 +79,15 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
 
     /// Set the event handler we are using for the bread thread.
     #[inline]
-    pub fn set_event_handler<F: FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>(
-        &mut self,
-        event_handler: F,
-    ) {
+    pub fn set_event_handler<F: FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>(&self, event_handler: F) {
         self.state.set_event_handler(event_handler);
+    }
+
+    /// Process an event using the currently set event handler.
+    #[inline]
+    pub fn process_event(&self, event: Ctrl::Event) {
+        // SAFETY: we know we are on the bread thread
+        unsafe { self.state.process_event(event) };
     }
 
     /// Run the main loop.

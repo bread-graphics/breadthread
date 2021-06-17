@@ -28,11 +28,11 @@ impl Completer for DirectCompleter {
 }
 
 /// Sends the value across a channel.
-pub(crate) struct SendCompleter<Dir: Any + Send> {
+pub(crate) struct SendCompleter<Dir> {
     inner: Option<Sender<Dir>>,
 }
 
-impl<Dir: Any + Send> SendCompleter<Dir> {
+impl<Dir> SendCompleter<Dir> {
     #[inline]
     pub(crate) fn new(inner: Sender<Dir>) -> Self {
         Self { inner: Some(inner) }
@@ -44,7 +44,7 @@ impl<Dir: Any + Send> SendCompleter<Dir> {
     }
 }
 
-impl<Dir: Any + Send> Completer for SendCompleter<Dir> {
+impl<Dir> Completer for SendCompleter<Dir> {
     #[inline]
     fn complete<T: Any + Send>(&mut self, object: T) {
         match self.inner.take() {

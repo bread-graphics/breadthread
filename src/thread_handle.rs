@@ -27,13 +27,15 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
     }
 
     /// Converts a raw pointer into a `ThreadHandle`.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// If this pointer was not created via the [`into_raw`] function, undefined behavior may occur.
     #[inline]
     pub unsafe fn from_raw(ptr: *const ()) -> Self {
-        Self { state: Weak::from_raw(ptr.cast()) }
+        Self {
+            state: Weak::from_raw(ptr.cast()),
+        }
     }
 
     #[inline]
@@ -71,6 +73,18 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
         Ok(())
     }
 
+    /// Process an event using the currently set event handler.
+    #[inline]
+    pub fn process_event(&self, event: Ctrl::Event) -> Result<(), Error<Ctrl::Error>> {
+        let state = self.state()?;
+        if thread::current().id() == state.bread_thread_id() {
+            unsafe { state.process_event(event) };
+            Ok(())
+        } else {
+            Err(Error::NotInBreadThread)
+        }
+    }
+
     /// Use a closure with the controller, if we are on the bread thread.
     #[inline]
     pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
@@ -81,7 +95,7 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
         } else {
             Err(Error::NotInBreadThread)
         }
-    } 
+    }
 
     /// Pin this thread handle to a thread.
     #[inline]
@@ -120,6 +134,7 @@ impl<Ctrl: Controller + Send + 'static> ThreadHandle<'static, Ctrl> {
 
 /// A handle to the bread thread that is locked to its thread. This allows it to omit a call to
 /// `thread::current().id()` which saves time.
+#[derive(Clone)]
 pub struct PinnedThreadHandle<'evh, Ctrl: Controller> {
     inner: ThreadHandle<'evh, Ctrl>,
     thread_id: ThreadId,
@@ -148,6 +163,18 @@ impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
         self.inner.set_event_handler(event_handler)
     }
 
+    /// Process an event using the currently set event handler.
+    #[inline]
+    pub fn process_event(&self, event: Ctrl::Event) -> Result<(), Error<Ctrl::Error>> {
+        let state = self.inner.state()?;
+        if self.thread_id == state.bread_thread_id() {
+            unsafe { state.process_event(event) };
+            Ok(())
+        } else {
+            Err(Error::NotInBreadThread)
+        }
+    }
+
     /// Use a closure with the controller, if we are on the bread thread.
     #[inline]
     pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
@@ -158,7 +185,7 @@ impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
         } else {
             Err(Error::NotInBreadThread)
         }
-    } 
+    }
 
     /// Unpin this thread handle.
     #[inline]

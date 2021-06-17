@@ -35,9 +35,11 @@ pub(crate) struct ThreadState<'evh, Ctrl: Controller> {
     pointers: RwLock<Vec<NonZeroUsize>>,
     /// The current event handler. The same guarantees backing the `RefCell` for the controller above back the
     /// `RefCell` here.
-    #[allow(clippy::type_complexity)]
-    event_handler: Mutex<Box<dyn FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>>,
+    event_handler: Mutex<BoxedEventHandler<'evh, Ctrl>>,
 }
+
+type BoxedEventHandler<'evh, Ctrl> =
+    Box<dyn FnMut(&Ctrl, <Ctrl as Controller>::Event) + Send + 'evh>;
 
 /// The interface for messaging the directive thread.
 struct DirectiveThreadMessenger<Dir> {
@@ -76,9 +78,9 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     }
 
     /// Use the inner controller in a closure.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Assumes we are in the bread thread.
     #[inline]
     pub(crate) unsafe fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> T {
@@ -86,9 +88,9 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     }
 
     /// Use the inner controller in a closure, mutably.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// Assumes we are in the bread thread.
     #[inline]
     pub(crate) unsafe fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(&self, f: F) -> T {
@@ -226,9 +228,8 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         let pointers = self.pointers.read();
         let invalid: Vec<_> = directive
             .pointers()
-            .iter()
+            .into_iter()
             .filter(|ptr| !pointers.contains(ptr))
-            .copied()
             .collect();
         if invalid.is_empty() {
             Ok(())
@@ -271,7 +272,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     ///
     /// This function assumes that it is running on the bread thread.
     #[inline]
-    unsafe fn process_event(&self, event: Ctrl::Event) {
+    pub(crate) unsafe fn process_event(&self, event: Ctrl::Event) {
         // SAFETY: we are running on the bread thread
         (self.event_handler.lock())(&self.controller.borrow(), event);
     }
