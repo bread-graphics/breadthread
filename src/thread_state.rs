@@ -8,12 +8,7 @@ use crate::{
 use flume::{Receiver, Sender};
 use once_cell::sync::{Lazy, OnceCell};
 use orphan_crippler::{Receiver as OcReceiver, Sender as OcSender};
-use std::{
-    any::Any,
-    cell::RefCell,
-    collections::HashSet,
-    num::NonZeroUsize,
-};
+use std::{any::Any, cell::RefCell, collections::HashSet, num::NonZeroUsize};
 use thread_safe::{ThreadKey, ThreadSafe};
 
 /// The inner state that the `BreadThread` owns and the `ThreadHandle`s keep a reference to. This contains the
@@ -82,7 +77,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
             pointers: RwLock::new(HashSet::new()),
             event_handler: EventHandler {
                 function: ThreadSafe::new(RefCell::new(Box::new(|_, _| Ok(())))),
-                changer: Lazy::new(|| flume::unbounded()),
+                changer: Lazy::new(flume::unbounded),
             },
         }
     }
