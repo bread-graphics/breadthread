@@ -1,6 +1,6 @@
 [package]
 name = "breadthread"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["notgull <jtnunley01@gmail.com>"]
 edition = "2018"
 description = "GUI abstraction; adds a thread controller that helps get some bread"
@@ -14,6 +14,7 @@ flume = { version = "0.10", default-features = false }
 parking_lot = { version = "0.11.1", optional = true }
 once_cell = { version = "1.8" }
 orphan-crippler = "0.1"
+thread-safe = "0.1"
 
 [features]
 pl = ["parking_lot", "once_cell/parking_lot", "orphan-crippler/parking_lot"]

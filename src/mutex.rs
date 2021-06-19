@@ -3,6 +3,7 @@
 #[cfg(not(feature = "pl"))]
 use std::sync;
 
+/*
 #[cfg(not(feature = "pl"))]
 pub(crate) struct Mutex<D> {
     inner: sync::Mutex<D>,
@@ -37,6 +38,7 @@ impl<D> Mutex<D> {
         self.inner.lock().expect("Unable to lock mutex")
     }
 }
+*/
 
 #[cfg(not(feature = "pl"))]
 pub(crate) struct RwLock<D> {

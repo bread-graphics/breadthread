@@ -4,10 +4,10 @@ use super::{BreadThread, Controller, Error, ThreadState};
 use orphan_crippler::Receiver;
 use std::{
     any::Any,
-    marker::PhantomData,
     sync::{mpsc, Arc, Weak},
-    thread::{self, ThreadId},
+    thread,
 };
+use thread_safe::ThreadKey;
 
 /// A handle to the bread thread that can be sent between threads.
 #[derive(Clone)]
@@ -17,27 +17,6 @@ pub struct ThreadHandle<'evh, Ctrl: Controller> {
 }
 
 impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
-    /// The `ThreadHandle` is represented internally as a pointer. This converts the `ThreadHandle` to that
-    /// pointer. In order to safely deallocate the memory, this pointer needs to be converted back into a
-    /// `ThreadHandle` using the [`from_ptr`] function.
-    #[must_use = "If the pointer isn't put into from_raw, memory may not properly deallocate"]
-    #[inline]
-    pub fn into_raw(self) -> *const () {
-        self.state.into_raw().cast()
-    }
-
-    /// Converts a raw pointer into a `ThreadHandle`.
-    ///
-    /// # Safety
-    ///
-    /// If this pointer was not created via the [`into_raw`] function, undefined behavior may occur.
-    #[inline]
-    pub unsafe fn from_raw(ptr: *const ()) -> Self {
-        Self {
-            state: Weak::from_raw(ptr.cast()),
-        }
-    }
-
     #[inline]
     fn state(&self) -> Result<Arc<ThreadState<'evh, Ctrl>>, Error<Ctrl::Error>> {
         match self.state.upgrade() {
@@ -58,13 +37,14 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
         directive: Ctrl::Directive,
     ) -> Result<Receiver<T>, Error<Ctrl::Error>> {
         let state = self.state()?;
-        // SAFETY: thread::current().id() is the ID for the current thread
-        unsafe { state.send_directive(directive, thread::current().id()) }
+        state.send_directive(directive, ThreadKey::get())
     }
 
     /// Set the event handler for the thread.
     #[inline]
-    pub fn set_event_handler<F: FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>(
+    pub fn set_event_handler<
+        F: FnMut(&Ctrl, Ctrl::Event) -> Result<(), Ctrl::Error> + Send + 'evh,
+    >(
         &self,
         event_handler: F,
     ) -> Result<(), Error<Ctrl::Error>> {
@@ -74,27 +54,21 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
     }
 
     /// Process an event using the currently set event handler.
+    ///
+    /// # Errors
+    ///
+    /// This errors out if not run on the bread thread.
     #[inline]
     pub fn process_event(&self, event: Ctrl::Event) -> Result<(), Error<Ctrl::Error>> {
         let state = self.state()?;
-        if thread::current().id() == state.bread_thread_id() {
-            unsafe { state.process_event(event) };
-            Ok(())
-        } else {
-            Err(Error::NotInBreadThread)
-        }
+        state.process_event(event, ThreadKey::get())
     }
 
     /// Use a closure with the controller, if we are on the bread thread.
     #[inline]
     pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
         let state = self.state()?;
-        if thread::current().id() == state.bread_thread_id() {
-            // SAFETY: we are on the bread thread
-            Ok(unsafe { state.with(f) })
-        } else {
-            Err(Error::NotInBreadThread)
-        }
+        state.with(f, ThreadKey::get())
     }
 
     /// Pin this thread handle to a thread.
@@ -102,8 +76,7 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
     pub fn pin(self) -> PinnedThreadHandle<'evh, Ctrl> {
         PinnedThreadHandle {
             inner: self,
-            thread_id: thread::current().id(),
-            _phantom: PhantomData,
+            key: ThreadKey::get(),
         }
     }
 }
@@ -137,9 +110,7 @@ impl<Ctrl: Controller + Send + 'static> ThreadHandle<'static, Ctrl> {
 #[derive(Clone)]
 pub struct PinnedThreadHandle<'evh, Ctrl: Controller> {
     inner: ThreadHandle<'evh, Ctrl>,
-    thread_id: ThreadId,
-    // ensure this is !Send and !Sync
-    _phantom: PhantomData<*const ThreadState<'evh, Ctrl>>,
+    key: ThreadKey,
 }
 
 impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
@@ -150,41 +121,33 @@ impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
         directive: Ctrl::Directive,
     ) -> Result<Receiver<T>, Error<Ctrl::Error>> {
         let state = self.inner.state()?;
-        // SAFETY: since this can't be moved, thread_id will always be current
-        unsafe { state.send_directive(directive, self.thread_id) }
+        state.send_directive(directive, self.key)
     }
 
     /// Set the event handler for the thread.
     #[inline]
-    pub fn set_event_handler<F: FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>(
+    pub fn set_event_handler<
+        F: FnMut(&Ctrl, Ctrl::Event) -> Result<(), Ctrl::Error> + Send + 'evh,
+    >(
         &self,
         event_handler: F,
     ) -> Result<(), Error<Ctrl::Error>> {
         self.inner.set_event_handler(event_handler)
     }
 
-    /// Process an event using the currently set event handler.
+    /// Process an event using the currently set event handler. This errors out if this is not pinned to the
+    /// bread thread.
     #[inline]
     pub fn process_event(&self, event: Ctrl::Event) -> Result<(), Error<Ctrl::Error>> {
         let state = self.inner.state()?;
-        if self.thread_id == state.bread_thread_id() {
-            unsafe { state.process_event(event) };
-            Ok(())
-        } else {
-            Err(Error::NotInBreadThread)
-        }
+        state.process_event(event, self.key)
     }
 
     /// Use a closure with the controller, if we are on the bread thread.
     #[inline]
     pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> Result<T, Error<Ctrl::Error>> {
         let state = self.inner.state()?;
-        if self.thread_id == state.bread_thread_id() {
-            // SAFETY: we are on the bread thread
-            Ok(unsafe { state.with(f) })
-        } else {
-            Err(Error::NotInBreadThread)
-        }
+        state.with(f, self.key)
     }
 
     /// Unpin this thread handle.

@@ -2,7 +2,8 @@
 
 use super::{Controller, Error, ThreadHandle, ThreadState};
 use orphan_crippler::Receiver;
-use std::{any::Any, cell::Cell, marker::PhantomData, sync::Arc, thread_local};
+use std::{any::Any, cell::Cell, sync::Arc, thread_local};
+use thread_safe::ThreadKey;
 
 thread_local! {
     /// There cannot be more than one `BreadThread` per thread. This indicates if this thread is currently a
@@ -18,8 +19,8 @@ thread_local! {
 /// threads or scoped executors.
 pub struct BreadThread<'evh, Ctrl: Controller> {
     state: Arc<ThreadState<'evh, Ctrl>>,
-    // ensure this object is !Send and !Sync
-    _phantom: PhantomData<*const ThreadState<'evh, Ctrl>>,
+    // key that represents that the thread we're on is the bread thread, also makes this `!Send`
+    key: ThreadKey,
 }
 
 impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
@@ -38,7 +39,7 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
         } else {
             Ok(Self {
                 state: Arc::new(ThreadState::new(controller)),
-                _phantom: PhantomData,
+                key: ThreadKey::get(),
             })
         }
     }
@@ -53,15 +54,15 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     /// Use the controller in a closure.
     #[inline]
     pub fn with<T, F: FnOnce(&Ctrl) -> T>(&self, f: F) -> T {
-        // SAFETY: we are guaranteed to be in the bread thread
-        unsafe { self.state.with(f) }
+        // we are guaranteed to be in the bread thread
+        self.state.with(f, self.key).unwrap()
     }
 
     /// Use the controller in a mutable closure.
     #[inline]
     pub fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(&mut self, f: F) -> T {
-        // SAFETY: as above so below
-        unsafe { self.state.with_mut(f) }
+        // we are guaranteed to be in the bread thread
+        self.state.with_mut(f, self.key).unwrap()
     }
 
     /// Send a directive to the thread's controller.
@@ -70,31 +71,30 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
         &self,
         directive: Ctrl::Directive,
     ) -> Result<Receiver<T>, Error<Ctrl::Error>> {
-        // SAFETY: since this is !send, we know we're in the bread thread
-        unsafe {
-            self.state
-                .send_directive(directive, self.state.bread_thread_id())
-        }
+        self.state.send_directive(directive, self.key)
     }
 
     /// Set the event handler we are using for the bread thread.
     #[inline]
-    pub fn set_event_handler<F: FnMut(&Ctrl, Ctrl::Event) + Send + 'evh>(&self, event_handler: F) {
+    pub fn set_event_handler<
+        F: FnMut(&Ctrl, Ctrl::Event) -> Result<(), Ctrl::Error> + Send + 'evh,
+    >(
+        &self,
+        event_handler: F,
+    ) {
         self.state.set_event_handler(event_handler);
     }
 
     /// Process an event using the currently set event handler.
     #[inline]
-    pub fn process_event(&self, event: Ctrl::Event) {
-        // SAFETY: we know we are on the bread thread
-        unsafe { self.state.process_event(event) };
+    pub fn process_event(&self, event: Ctrl::Event) -> Result<(), Error<Ctrl::Error>> {
+        self.state.process_event(event, self.key)
     }
 
     /// Run the main loop.
     #[inline]
     pub fn main_loop(self) -> Result<(), Error<Ctrl::Error>> {
-        // SAFETY: we are in the bread thread
-        while unsafe { self.state.loop_cycle() }? {}
+        while self.state.loop_cycle(self.key)? {}
         Ok(())
     }
 

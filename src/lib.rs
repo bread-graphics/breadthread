@@ -30,6 +30,8 @@
 //! `breadthread` uses mutexes internally. When the `pl` feature is enabled, it uses `parking_lot`
 //! mutexes instead of `std::sync` mutexes. This may be useful in programs that already use `parking_lot`.
 
+#![forbid(unsafe_code)]
+
 mod bread_thread;
 mod completer;
 mod controller;
@@ -49,6 +51,7 @@ pub use thread_handle::*;
 pub(crate) use thread_state::*;
 
 use std::{error::Error as StdError, fmt, num::NonZeroUsize};
+use thread_safe::NotInOriginThread;
 
 /// An error occurred during operation of `breadthread`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -67,10 +70,10 @@ pub enum Error<InnerError> {
     Controller(InnerError),
 }
 
-impl<InnerError> From<InnerError> for Error<InnerError> {
+impl<InnerError> From<NotInOriginThread> for Error<InnerError> {
     #[inline]
-    fn from(ie: InnerError) -> Error<InnerError> {
-        Error::Controller(ie)
+    fn from(_: NotInOriginThread) -> Error<InnerError> {
+        Error::NotInBreadThread
     }
 }
 
@@ -94,4 +97,12 @@ impl<InnerError: fmt::Display> fmt::Display for Error<InnerError> {
     }
 }
 
-impl<InnerError: fmt::Display + fmt::Debug> StdError for Error<InnerError> {}
+impl<InnerError: fmt::Display + fmt::Debug> StdError for Error<InnerError> {
+    #[inline]
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        match self {
+            Error::NotInBreadThread => Some(&NotInOriginThread),
+            _ => None,
+        }
+    }
+}
