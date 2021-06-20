@@ -10,10 +10,18 @@ use std::{
 use thread_safe::ThreadKey;
 
 /// A handle to the bread thread that can be sent between threads.
-#[derive(Clone)]
 #[repr(transparent)]
 pub struct ThreadHandle<'evh, Ctrl: Controller> {
     state: Weak<ThreadState<'evh, Ctrl>>,
+}
+
+impl<'evh, Ctrl: Controller> Clone for ThreadHandle<'evh, Ctrl> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            state: self.state.clone(),
+        }
+    }
 }
 
 impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
@@ -107,10 +115,19 @@ impl<Ctrl: Controller + Send + 'static> ThreadHandle<'static, Ctrl> {
 
 /// A handle to the bread thread that is locked to its thread. This allows it to omit a call to
 /// `thread::current().id()` which saves time.
-#[derive(Clone)]
 pub struct PinnedThreadHandle<'evh, Ctrl: Controller> {
     inner: ThreadHandle<'evh, Ctrl>,
     key: ThreadKey,
+}
+
+impl<'evh, Ctrl: Controller> Clone for PinnedThreadHandle<'evh, Ctrl> {
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            key: self.key,
+        }
+    }
 }
 
 impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
