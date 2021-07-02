@@ -62,7 +62,10 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     #[inline]
     pub fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(&mut self, f: F) -> T {
         // we are guaranteed to be in the bread thread
-        self.state.with_mut(f, self.key).unwrap()
+        Arc::get_mut(&mut self.state)
+            .expect("Already has handles")
+            .with_mut(f, self.key)
+            .unwrap()
     }
 
     /// Send a directive to the thread's controller.

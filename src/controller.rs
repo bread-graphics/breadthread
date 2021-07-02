@@ -21,9 +21,9 @@ pub trait Controller {
     type Pointers: IntoIterator<Item = AddOrRemovePtr>;
 
     /// Get a directive adaptor.
-    fn directive_adaptor(&mut self) -> Self::DirectiveAdaptor;
+    fn directive_adaptor(&self) -> Self::DirectiveAdaptor;
     /// Run an event loop cycle. Do not process any directives during this time.
-    fn loop_cycle(&mut self) -> Result<LoopCycle<Self::Event, Self::Directive>, Self::Error>;
+    fn loop_cycle(&self) -> Result<LoopCycle<Self::Event, Self::Directive>, Self::Error>;
     /// Process a directive and send the result down a `Sender`. Returns the list of pointers to add or remove
     /// from the verified pointers list.
     ///

@@ -6,7 +6,7 @@ use crate::{
     AddOrRemovePtr, Controller, DirectCompleter, Directive, Error, LoopCycle, SendCompleter,
 };
 use flume::{Receiver, Sender};
-use once_cell::sync::{Lazy, OnceCell};
+use once_cell::sync::OnceCell;
 use orphan_crippler::{Receiver as OcReceiver, Sender as OcSender};
 use std::{any::Any, cell::RefCell, collections::HashSet, num::NonZeroUsize};
 use thread_safe::{ThreadKey, ThreadSafe};
@@ -15,10 +15,8 @@ use thread_safe::{ThreadKey, ThreadSafe};
 /// controller and generally dictates what each part of the program does.
 pub(crate) struct ThreadState<'evh, Ctrl: Controller> {
     /// The controller used to dictate what the threads do. This should only be accessed directly by the thread
-    /// in which the `BreadThread` sits. Therefore, we use a `RefCell` so that the owning thread will have
-    /// mutable access to the controller. Without sifting through atomics. We also use a `ThreadSafe` so only our
-    /// origin thread can ever access it.
-    controller: ThreadSafe<RefCell<Ctrl>>,
+    /// in which the `BreadThread` sits. We use a `ThreadSafe` so only our origin thread can ever access it.
+    controller: ThreadSafe<Ctrl>,
     /// It is necessary to send messages to the directive thread, telling it whether or not it needs to close
     /// down. This acts as a way to send these messages to the directive thread. Note that the directive thread
     /// is only initialized once a `ThreadHandle` is explicitly created, so a `OnceCell` is used in order to
@@ -36,18 +34,15 @@ type BoxedEventHandler<'evh, Ctrl> = Box<
         + 'evh,
 >;
 
-type SenderReceiverPair<'evh, Ctrl> = (
-    Sender<BoxedEventHandler<'evh, Ctrl>>,
-    Receiver<BoxedEventHandler<'evh, Ctrl>>,
-);
-
 /// The interface for handling events.
 struct EventHandler<'evh, Ctrl: Controller> {
     /// The function itself. Kept in a `ThreadSafe<RefCell>` instead of a `Mutex`, since it's only read in the
     /// current thread and changing it is a cold operation.
     function: ThreadSafe<RefCell<BoxedEventHandler<'evh, Ctrl>>>,
-    /// Sender and receiver for changing the event handler. These are lazily initialized.
-    changer: Lazy<SenderReceiverPair<'evh, Ctrl>>,
+    /// Sender for changing the event handler.
+    sender: Sender<BoxedEventHandler<'evh, Ctrl>>,
+    /// Receiver for changing the event handler.
+    recv: Receiver<BoxedEventHandler<'evh, Ctrl>>,
 }
 
 /// The interface for messaging the directive thread.
@@ -61,6 +56,7 @@ struct DirectiveThreadMessenger<Dir> {
 impl<'evh, Ctrl: Controller> Drop for ThreadState<'evh, Ctrl> {
     #[inline]
     fn drop(&mut self) {
+        log::trace!("Dropping ThreadState");
         if let Some(dtm) = self.directive_thread_messenger.get() {
             let _ = dtm.message.try_send(DirectiveThreadMessage::Stop);
         }
@@ -71,13 +67,16 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// Create a new `ThreadState` using a controller.
     #[inline]
     pub(crate) fn new(controller: Ctrl) -> Self {
+        log::trace!("Running ThreadState::new()");
+        let (sender, recv) = flume::unbounded();
         ThreadState {
-            controller: ThreadSafe::new(RefCell::new(controller)),
+            controller: ThreadSafe::new(controller),
             directive_thread_messenger: OnceCell::new(),
             pointers: RwLock::new(HashSet::new()),
             event_handler: EventHandler {
                 function: ThreadSafe::new(RefCell::new(Box::new(|_, _| Ok(())))),
-                changer: Lazy::new(flume::unbounded),
+                sender,
+                recv,
             },
         }
     }
@@ -93,7 +92,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         f: F,
         key: ThreadKey,
     ) -> Result<T, Error<Ctrl::Error>> {
-        Ok(f(&self.controller.try_get_ref_with_key(key)?.borrow()))
+        Ok(f(self.controller.try_get_ref_with_key(key)?))
     }
 
     /// Use the inner controller in a closure, mutably.
@@ -103,14 +102,11 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// Errors out if this isn't the bread thread.
     #[inline]
     pub(crate) fn with_mut<T, F: FnOnce(&mut Ctrl) -> T>(
-        &self,
+        &mut self,
         f: F,
         key: ThreadKey,
     ) -> Result<T, Error<Ctrl::Error>> {
-        Ok(f(&mut self
-            .controller
-            .try_get_ref_with_key(key)?
-            .borrow_mut()))
+        Ok(f(self.controller.try_get_mut_with_key(key)?))
     }
 
     /// Set the current event handler.
@@ -122,8 +118,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         handler: Ev,
     ) {
         self.event_handler
-            .changer
-            .0
+            .sender
             .try_send(Box::new(handler))
             .expect("As long as this object lives, the channel should be intact")
     }
@@ -135,11 +130,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
             .directive_thread_messenger
             .get_or_try_init(|| {
                 // SAFETY: we're on the bread thread, we can safely access "controller"
-                let adaptor = self
-                    .controller
-                    .try_get_ref()?
-                    .borrow_mut()
-                    .directive_adaptor();
+                let adaptor = self.controller.try_get_ref()?.directive_adaptor();
 
                 // start the thread
                 let (message, directive_channel) = launch_directive_thread(adaptor);
@@ -165,11 +156,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// This function will error out if it is not the bread thread.
     #[inline]
     pub(crate) fn loop_cycle(&self, key: ThreadKey) -> Result<bool, Error<Ctrl::Error>> {
-        let res = self
-            .controller
-            .try_get_ref_with_key(key)?
-            .borrow_mut()
-            .loop_cycle();
+        let res = self.controller.try_get_ref_with_key(key)?.loop_cycle();
         match res {
             Err(e) => Err(Error::Controller(e)),
             Ok(LoopCycle::Continue(event)) => {
@@ -183,7 +170,6 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
                 self.process_ptrs(
                     self.controller
                         .try_get_ref_with_key(key)?
-                        .borrow()
                         .process_directive(directive, &mut completer),
                 );
 
@@ -214,11 +200,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         if let Ok(controller) = self.controller.try_get_ref_with_key(key) {
             // we are on the bread thread, we can just use the directive thread
             let mut completer = DirectCompleter::Empty;
-            self.process_ptrs(
-                controller
-                    .borrow()
-                    .process_directive(directive, &mut completer),
-            );
+            self.process_ptrs(controller.process_directive(directive, &mut completer));
             match completer {
                 DirectCompleter::Complete(value) => {
                     match Box::<dyn Any + Send + 'static>::downcast(value) {
@@ -296,8 +278,8 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     ) -> Result<(), Error<Ctrl::Error>> {
         let evhbox = self.event_handler.function.try_get_ref_with_key(key)?;
         // shouldn't panic, we're on the same thread
-        let controller = self.controller.get_ref_with_key(key).borrow();
-        if let Ok(mut event_handler) = self.event_handler.changer.1.try_recv() {
+        let controller = self.controller.get_ref_with_key(key);
+        if let Ok(mut event_handler) = self.event_handler.recv.try_recv() {
             let res = event_handler(&controller, event);
             *evhbox.borrow_mut() = event_handler;
             match res {
