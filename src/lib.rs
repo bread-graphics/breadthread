@@ -36,6 +36,7 @@ mod bread_thread;
 mod completer;
 mod controller;
 mod directive;
+mod key;
 mod thread_handle;
 mod thread_state;
 
@@ -46,6 +47,7 @@ pub use bread_thread::*;
 pub use completer::*;
 pub use controller::*;
 pub use directive::*;
+pub use key::*;
 pub use thread_handle::*;
 
 pub(crate) use thread_state::*;

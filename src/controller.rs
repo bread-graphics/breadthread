@@ -41,7 +41,7 @@ pub enum AddOrRemovePtr {
     /// Do nothing. This only exists so this enum can have a `Default` impl.
     DoNothing,
     /// Add a pointer to the verified list.
-    AddPtr(NonZeroUsize),
+    AddPtr(NonZeroUsize, usize),
     /// Remove a pointer from the verified list.
     RemovePtr(NonZeroUsize),
 }
