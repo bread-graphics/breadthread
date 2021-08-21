@@ -126,7 +126,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// Get the directive channel used to send directives to the bread thread.
     #[inline]
     fn directive_channel(&self) -> &DirectiveThreadMessenger<Ctrl::Directive> {
-        &self
+        self
             .directive_thread_messenger
             .get_or_try_init(|| {
                 // SAFETY: we're on the bread thread, we can safely access "controller"
@@ -252,14 +252,14 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         // shouldn't panic, we're on the same thread
         let controller = self.controller.get_ref_with_key(key);
         if let Ok(mut event_handler) = self.event_handler.recv.try_recv() {
-            let res = event_handler(&controller, event);
+            let res = event_handler(controller, event);
             *evhbox.borrow_mut() = event_handler;
             match res {
                 Ok(res) => Ok(res),
                 Err(e) => Err(Error::Controller(e)),
             }
         } else {
-            match (evhbox.borrow_mut())(&controller, event) {
+            match (evhbox.borrow_mut())(controller, event) {
                 Ok(res) => Ok(res),
                 Err(e) => Err(Error::Controller(e)),
             }
