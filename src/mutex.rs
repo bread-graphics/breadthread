@@ -41,11 +41,13 @@ impl<D> Mutex<D> {
 */
 
 #[cfg(not(feature = "pl"))]
+#[derive(Debug)]
 pub(crate) struct RwLock<D> {
     inner: sync::RwLock<D>,
 }
 
 #[cfg(feature = "pl")]
+#[derive(Debug)]
 pub(crate) struct RwLock<D> {
     inner: parking_lot::RwLock<D>,
 }

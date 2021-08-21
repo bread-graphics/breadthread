@@ -28,14 +28,8 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     /// bread thread.
     #[inline]
     pub fn try_new(controller: Ctrl) -> Result<Self, Error<Ctrl::Error>> {
-        if let Err(e) = IS_BREAD_THREAD.with(|ibt| {
-            if ibt.replace(true) {
-                Err(Error::AlreadyABreadThread)
-            } else {
-                Ok(())
-            }
-        }) {
-            Err(e)
+        if IS_BREAD_THREAD.with(|ibt| ibt.replace(true)) {
+            Err(Error::NotInBreadThread)
         } else {
             Ok(Self {
                 state: Arc::new(ThreadState::new(controller)),

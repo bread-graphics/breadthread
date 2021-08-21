@@ -2,13 +2,13 @@
 
 use crate::{
     directive_thread::{launch_directive_thread, DirectiveThreadMessage},
-    mutex::RwLock,
-    AddOrRemovePtr, Controller, DirectCompleter, Directive, Error, LoopCycle, SendCompleter,
+    AddOrRemovePtr, Controller, DirectCompleter, Directive, Error, KeyServer, LoopCycle,
+    SendCompleter,
 };
 use flume::{Receiver, Sender};
 use once_cell::sync::OnceCell;
 use orphan_crippler::{Receiver as OcReceiver, Sender as OcSender};
-use std::{any::Any, cell::RefCell, collections::HashSet, num::NonZeroUsize};
+use std::{any::Any, cell::RefCell};
 use thread_safe::{ThreadKey, ThreadSafe};
 
 /// The inner state that the `BreadThread` owns and the `ThreadHandle`s keep a reference to. This contains the
@@ -23,7 +23,7 @@ pub(crate) struct ThreadState<'evh, Ctrl: Controller> {
     /// express this. A sync `OnceCell` is used because it may be accessed from multiple threads.
     directive_thread_messenger: OnceCell<DirectiveThreadMessenger<Ctrl::Directive>>,
     /// The list of pointers that belongs to the `BreadThread`.
-    pointers: RwLock<HashSet<NonZeroUsize>>,
+    pointers: KeyServer,
     /// The current event handler.    
     event_handler: EventHandler<'evh, Ctrl>,
 }
@@ -72,7 +72,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
         ThreadState {
             controller: ThreadSafe::new(controller),
             directive_thread_messenger: OnceCell::new(),
-            pointers: RwLock::new(HashSet::new()),
+            pointers: KeyServer::new(),
             event_handler: EventHandler {
                 function: ThreadSafe::new(RefCell::new(Box::new(|_, _| Ok(())))),
                 sender,
@@ -224,45 +224,17 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// Verify if some pointers are currently valid.
     #[inline]
     fn validate_ptrs(&self, directive: &Ctrl::Directive) -> Result<(), Error<Ctrl::Error>> {
-        let pointers = self.pointers.read();
-        let invalid: Vec<_> = directive
-            .pointers()
-            .into_iter()
-            .filter(|ptr| !pointers.contains(ptr))
-            .collect();
-        if invalid.is_empty() {
-            Ok(())
+        if let Err(invalid) = self.pointers.verify_pointers(directive.pointers()) {
+            Err(Error::InvalidPtr(invalid))
         } else {
-            Err(Error::InvalidPtrs(invalid))
+            Ok(())
         }
     }
 
     /// Process adding and removing pointers.
     #[inline]
     fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(&self, ptrs: I) {
-        let ptrs = ptrs.into_iter();
-        let (lo, hi) = ptrs.size_hint();
-        assert_eq!(Some(lo), hi);
-
-        if lo == 0 {
-            return;
-        }
-
-        let mut blacklist = vec![];
-        let mut pointers = self.pointers.write();
-        for ptr in ptrs {
-            match ptr {
-                AddOrRemovePtr::DoNothing => (),
-                AddOrRemovePtr::AddPtr(p) => {
-                    pointers.insert(p);
-                }
-                AddOrRemovePtr::RemovePtr(p) => {
-                    blacklist.push(p);
-                }
-            }
-        }
-
-        pointers.retain(move |p| !blacklist.contains(&p));
+        self.pointers.process_new_pointers(ptrs)
     }
 
     /// Process an event.

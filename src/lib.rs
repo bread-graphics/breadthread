@@ -59,7 +59,7 @@ use thread_safe::NotInOriginThread;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Error<InnerError> {
     /// Directive contained external pointers that didn't belong.
-    InvalidPtrs(Vec<NonZeroUsize>),
+    InvalidPtr(NonZeroUsize),
     /// The bread thread has ceased operation.
     Closed,
     /// The controller failed to complete processing a directive.
@@ -83,12 +83,8 @@ impl<InnerError: fmt::Display> fmt::Display for Error<InnerError> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::InvalidPtrs(ptrs) => {
-                f.write_str("Directive contained external pointers that do not belong to the bread thread: [")?;
-                for ptr in ptrs {
-                    write!(f, "{:#08X},", ptr)?;
-                }
-                f.write_str("]")
+            Error::InvalidPtr(ptr) => {
+                write!(f, "Directive contained external pointer that does not belong to the bread thread: {:#08X}", ptr)
             }
             Error::Closed => f.write_str("The bread thread is closed and cannot be used"),
             Error::UnableToComplete => f.write_str("The controller did not complete the directive"),
