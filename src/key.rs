@@ -24,7 +24,7 @@ pub struct Key<Type> {
 impl<Type> Key<Type> {
     /// Create a new `Key` from a `NonZeroUsize`.
     #[inline]
-    pub fn from_raw(nzu: NonZeroUsize) -> Key<Type> {
+    pub const fn from_raw(nzu: NonZeroUsize) -> Key<Type> {
         Key {
             key: nzu,
             _marker: PhantomData,
@@ -182,10 +182,17 @@ macro_rules! key_type {
         #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         $vis struct $tyname ( $crate::Key<$traitname> );
 
+        impl std::fmt::Debug for $tyname {
+            #[inline]
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                std::write!(f, "{:#010x}", self.into_raw())
+            }
+        }
+
         impl $tyname {
             #[doc = concat!("Creates a new `", stringify!($tyname), "` from an appropriately typed key.")]
             #[inline]
-            pub fn from_key(key: $crate::Key<$traitname>) -> Self {
+            pub const fn from_key(key: $crate::Key<$traitname>) -> Self {
                 Self(key)
             }
 
@@ -198,13 +205,13 @@ macro_rules! key_type {
             #[doc = concat!("Constructs a `", stringify!($tyname), "` from a non-zero `usize` representing a")]
             #[doc = concat!("pointer to a `", stringify!($foreign), "`.")]
             #[inline]
-            pub fn from_raw(raw: std::num::NonZeroUsize) -> Self {
+            pub const fn from_raw(raw: std::num::NonZeroUsize) -> Self {
                 Self::from_key($crate::Key::from_raw(raw))
             }
 
             #[doc = concat!("Get the backing `NonZeroUsize` from this `", stringify!($tyname), "`.")]
             #[inline]
-            pub fn into_raw(self) -> NonZeroUsize {
+            pub fn into_raw(self) -> std::num::NonZeroUsize {
                 self.into_key().into_raw()
             }
 
@@ -247,8 +254,16 @@ macro_rules! key_type {
             #[doc = concat!("Get a bundle consisting of this `", stringify!($tyname), "`'s backing pointer")]
             #[doc = "and its identifier. Useful for passing into `Directive::pointers()`"]
             #[inline]
-            pub fn verifiable(self) -> (NonZeroUsize, usize) {
+            pub fn verifiable(self) -> (std::num::NonZeroUsize, usize) {
                 (self.into_raw(), $value)
+            }
+
+            #[doc = concat!("Convert this `", stringify!($tyname), "` into an `AddOrRemovePtr` that can be ")]
+            #[doc = "effectively processed by the bread thread."]
+            #[inline]
+            pub fn as_addorremoveptr(self) -> $crate::AddOrRemovePtr {
+                let (key, ty) = self.verifiable();
+                $crate::AddOrRemovePtr::AddPtr(key, ty)
             }
         }
     }

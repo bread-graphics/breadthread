@@ -68,3 +68,10 @@ pub trait DirectiveAdaptor<Directive> {
     /// Send a directive over this `DirectiveAdaptor`.
     fn send(&mut self, directive: Sender<Directive>);
 }
+
+impl<Directive, F: FnMut(Sender<Directive>)> DirectiveAdaptor<Directive> for F {
+    #[inline]
+    fn send(&mut self, directive: Sender<Directive>) {
+        (self)(directive)
+    }
+}

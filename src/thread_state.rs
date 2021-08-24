@@ -126,8 +126,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
     /// Get the directive channel used to send directives to the bread thread.
     #[inline]
     fn directive_channel(&self) -> &DirectiveThreadMessenger<Ctrl::Directive> {
-        self
-            .directive_thread_messenger
+        self.directive_thread_messenger
             .get_or_try_init(|| {
                 // SAFETY: we're on the bread thread, we can safely access "controller"
                 let adaptor = self.controller.try_get_ref()?.directive_adaptor();
@@ -233,7 +232,7 @@ impl<'evh, Ctrl: Controller> ThreadState<'evh, Ctrl> {
 
     /// Process adding and removing pointers.
     #[inline]
-    fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(&self, ptrs: I) {
+    pub(crate) fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(&self, ptrs: I) {
         self.pointers.process_new_pointers(ptrs)
     }
 

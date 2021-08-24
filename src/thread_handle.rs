@@ -1,6 +1,6 @@
 // MIT/Apache2 License
 
-use super::{BreadThread, Controller, Error, ThreadState};
+use super::{AddOrRemovePtr, BreadThread, Controller, Error, ThreadState};
 use orphan_crippler::Receiver;
 use std::{
     any::Any,
@@ -87,6 +87,16 @@ impl<'evh, Ctrl: Controller> ThreadHandle<'evh, Ctrl> {
             key: ThreadKey::get(),
         }
     }
+
+    /// Manually process pointers.
+    #[inline]
+    pub fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(
+        &self,
+        iter: I,
+    ) -> Result<(), Error<Ctrl::Error>> {
+        self.state()?.process_ptrs(iter);
+        Ok(())
+    }
 }
 
 impl<Ctrl: Controller + Send + 'static> ThreadHandle<'static, Ctrl> {
@@ -171,5 +181,15 @@ impl<'evh, Ctrl: Controller> PinnedThreadHandle<'evh, Ctrl> {
     #[inline]
     pub fn into_inner(self) -> ThreadHandle<'evh, Ctrl> {
         self.inner
+    }
+
+    /// Manually process pointers.
+    #[inline]
+    pub fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(
+        &self,
+        iter: I,
+    ) -> Result<(), Error<Ctrl::Error>> {
+        self.inner.state()?.process_ptrs(iter);
+        Ok(())
     }
 }

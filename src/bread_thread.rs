@@ -1,6 +1,6 @@
 // MIT/Apache2 License
 
-use super::{Controller, Error, ThreadHandle, ThreadState};
+use super::{AddOrRemovePtr, Controller, Error, ThreadHandle, ThreadState};
 use orphan_crippler::Receiver;
 use std::{any::Any, cell::Cell, sync::Arc, thread_local};
 use thread_safe::ThreadKey;
@@ -100,6 +100,12 @@ impl<'evh, Ctrl: Controller> BreadThread<'evh, Ctrl> {
     pub fn handle(&self) -> ThreadHandle<'evh, Ctrl> {
         self.state.init_directive_channel();
         ThreadHandle::from_weak(Arc::downgrade(&self.state))
+    }
+
+    /// Manually process pointers.
+    #[inline]
+    pub fn process_ptrs<I: IntoIterator<Item = AddOrRemovePtr>>(&self, iter: I) {
+        self.state.process_ptrs(iter)
     }
 }
 
