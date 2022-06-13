@@ -9,12 +9,14 @@ repository = "https://github.com/notgull/breadthread"
 homepage = "https://github.com/notgull/breadthread#readme"
 
 [dependencies]
-hashbrown = { version = "0.12.1", default-features = false }
 ahash = { version = "0.7.6", default-features = false, features = ["compile-time-rng"] }
-spin = { version = "0.9.3", default-features = false, features = ["lazy", "mutex", "once"] }
-once_cell = { version = "1.12.0", optional = true }
-tracing = { version = "0.1.35", default-features = false }
+atomic-waker = { version = "1.0.0", optional = true }
 flume = { version = "0.10.13", optional = true, default-features = false }
+hashbrown = { version = "0.12.1", default-features = false }
+once_cell = { version = "1.12.0", optional = true }
+parking = "2.0.0"
+spin = { version = "0.9.3", default-features = false, features = ["lazy", "mutex", "once"] }
+tracing = { version = "0.1.35", default-features = false }
 
 [target.'cfg(loom)'.dependencies]
 loom = "0.5"
@@ -23,3 +25,4 @@ loom = "0.5"
 default = ["std"]
 std = ["ahash/std", "flume", "tracing/std"]
 fallback = []
+async = ["atomic-waker"]

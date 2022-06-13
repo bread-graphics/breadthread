@@ -23,6 +23,10 @@ mod std_sync {
     pub fn oc_into_inner<T>(cell: OnceCell<T>) -> Option<T> {
         cell.into_inner()
     }
+
+    pub fn oc_with_value<T>(val: T) -> OnceCell<T> {
+        OnceCell::with_value(val)
+    }
 }
 
 #[cfg(not(feature = "std"))]
@@ -41,6 +45,12 @@ mod spin_sync {
 
     pub fn oc_into_inner<T>(cell: OnceCell<T>) -> Option<T> {
         cell.try_into_inner()
+    }
+
+    pub fn oc_with_value<T>(val: T) -> OnceCell<T> {
+        let oc = OnceCell::new();
+        oc.call_once(move || val);
+        oc
     }
 }
 

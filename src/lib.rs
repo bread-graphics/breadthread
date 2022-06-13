@@ -1,7 +1,138 @@
 // MIT/Apache2 License
 
 //! A runtime that allows thread-unsafe code to be executed on a designated
-//! thread.
+//!
+//! ## Motivation
+//!
+//! There are quite a few APIs that are thread unsafe. The one I had in mind
+//! while designing this crate is the Windows `winuser` windowing API, but
+//! there are many others. While small programs may be able to get away with
+//! being thread unsafe, larger programs, with runtimes that require `Safe`
+//! bounds, may not.
+//!
+//! Ordinarily, these programs will have to resort to convoluted systems to
+//! ensure that code runs on a desigated "local" thread or thread pool. The
+//! goal of this crate is to simplify these systems by providing a runtime
+//! that allows thread-unsafe code to be executed on a designated thread.
+//!
+//! ## Usage
+//!
+//! First, create a type to use as a [`Tag`]. This type will be used to
+//! uniquely identify the thread that the runtime will run on at compile time.
+//! This ensures that values that are native to one thread will not be used
+//! on another thread.
+//!
+//! Any `'static` type can be used as a tag, and it's recommended to use a
+//! zero-sized type.
+//!
+//! ```rust
+//! struct MyTag;
+//! # let _ = MyTag;
+//! ```
+//!
+//! Then, create a [`BreadThread`] type. This is the runtime that directives
+//! are sent along. To spawn a new thread to run directives on, use the `new`
+//! method.
+//!
+//! ```rust
+//! use breadthread::BreadThread;
+//!
+//! # struct MyTag;
+//! let bt = BreadThread::<'static, MyTag>::new();
+//! # let _ = bt;
+//! ```
+//!
+//! However, if you already have a system that you'd like to take advantage of
+//! (a dedicated thread pool like [`rayon`], for instance), you can use the
+//! `undriven()` method to create both a `BreadThread` and a [`Driver`]. You can
+//! transform a thread or thread-like task into the driving thread by calling
+//! `drive()` on the `Driver`.
+//!
+//! ```rust
+//! # use breadthread::BreadThread;
+//! # struct MyTag;
+//! let (bt, driver) = BreadThread::<'static, MyTag>::undriven();
+//! my_runtime::spawn_task(move || driver.drive());
+//! # let _ = bt;
+//! # mod my_runtime {
+//! #     pub fn spawn_task<F: FnOnce()>(_f: F) {}
+//! # }
+//! ```
+//!
+//! Note that the `BreadThread` and `Driver` are parameterized by a lifetime, which
+//! in this case is `'static`. The lifetime is used as a bound for the directives that
+//! we send to the thread. Consider using this if you want to send a directive that borrows
+//! other data.
+//!
+//! Now, we can call the `run` method on the `BreadThread` to run a given method.
+//! 
+//! ```rust
+//! # use breadthread::BreadThread;
+//! # struct MyTag;
+//! # let bt = BreadThread::<'static, MyTag>::new();
+//! 
+//! use breadthread::DirectiveOutput;
+//! 
+//! let input_value = 7;
+//! let value = bt.run((), move |()| {
+//!     let ret_ty = thread_unsafe_code(input_value);
+//!     DirectiveOutput {
+//!         thread_safe_value: (),
+//!         thread_unsafe_value: ret_ty,
+//!         deleted_values: vec![],
+//!     }
+//! });
+//! 
+//! # fn thread_unsafe_code(_i: i32) -> i32 { 0 }
+//! ```
+//! 
+//! `bt.run()` expects a return type of [`DirectiveOutput`], which consists of:
+//! 
+//! - A `thread_safe_value` that is implied to be `Send` and `Sync`.
+//! - A `thread_unsafe_value` that may not be any of these. Once `value` returns, this
+//!   value will be wrapped in [`Object`], which essentially allows it to be sent to
+//!   other threads, but only used in the driving thread. To use this value again, pass it
+//!   into the `bt.run()` method in place of the empty tuple, and it can be used raw
+//!   again. Tuples and slices of `Object`s can be returned using this strategy.
+//!   Note that values of this kind have to implement [`Compatible`].
+//! - `deleted_values` consists of values to be deleted from the thread's internal bank
+//!   that keeps track of the values that are valid for it. By default, values returned
+//!   are added to the "valid" list, so if you don't expect to use the value again, you
+//!   can add it to the `deleted_values` list.
+//! 
+//! `value` is of type [`Value`], and resolves to a tuple of `thread_safe_value` and the
+//! safe version of `thread_unsafe_value`. It can be resolved in one of three ways:
+//! 
+//! - Poll for whether or not it's resolved using `value.resolve()`.
+//! - Wait for it to be resolved by parking the thread, using `value.wait()`.
+//! - With the `async` feature enabled, `Value` implements [`Future`].
+//! 
+//! ## Safety
+//! 
+//! Using `tag` ensures that the bread thread will only have values that are tagged as
+//! valid associated with it. As long as two threads do not have the same tag, this
+//! validation is done at compile time, and the only real overhead is in sending and
+//! receiving values from the two threads.
+//! 
+//! If more than one thread is created with the same tag, by default the library panics.
+//! If this behavior is not desired, enable the `fallback` feature. Instead, when two
+//! threads share a tag, they will manually keep track of which values are valid for
+//! which thread.
+//! 
+//! ## `no_std`
+//! 
+//! The `std` feature is enabled by default. Without `std`, this crate only relies on the
+//! `alloc` crate. However, certain changes are made both externally and internally.
+//! 
+//! - `BreadThread::new()`, `Driv(er::drive()` and `Value::wait()` are not present.
+//! - Internally, the data structures use spinlock-based APIs instead of ones based on
+//!   system synchronization. This is often undesireable behavior.
+//! 
+//! It is recommended to use the `std` feature unless it is necessary to use this crate
+//! in a `no_std` environment.
+//!
+//! [`rayon`]: https://crates.io/crates/rayon
+//! [`Future`]: std::future::Future
 
 #![no_std]
 
@@ -12,12 +143,10 @@ extern crate std;
 
 use ahash::RandomState;
 use alloc::{boxed::Box, vec::Vec};
-use core::{
-    any::TypeId,
-    marker::PhantomData,
-    mem,
-};
+use core::{any::TypeId, marker::PhantomData, mem};
 use hashbrown::{hash_map::Entry, HashMap as HbHashMap, HashSet as HbHashSet};
+
+pub use value::Value;
 
 #[cfg(not(loom))]
 use alloc::sync::Arc;
@@ -31,12 +160,15 @@ use loom::sync::{
 
 mod channel;
 mod sync;
+mod value;
 
 /// A runtime for allowing thread unsafe code to be run on a designated
 /// thread.
-pub struct BreadThread<'lt, Tag> {
+pub struct BreadThread<'lt, Tag: 'static> {
     // a channel used to send directives to the thread
     sender: channel::Sender<Directive<'lt>>,
+    // count to decrement on drop
+    count: Arc<AtomicUsize>,
     _tag: PhantomData<Tag>,
 }
 
@@ -86,6 +218,7 @@ enable the `fallback` feature on the `breadthread` crate to allow this
         let (sender, receiver) = channel::channel();
         let bt = Self {
             sender,
+            count: fallback.clone(),
             _tag: PhantomData,
         };
         let driver = Driver {
@@ -98,7 +231,7 @@ enable the `fallback` feature on the `breadthread` crate to allow this
     }
 
     /// Send a new directive to the thread to be polled and used.
-    pub fn send<
+    pub fn run<
         Input: 'lt + Wrapped<Tag>,
         NtsOutput: 'lt + Send + Sync,
         TsOutput: 'lt + Wrapped<Tag>,
@@ -150,6 +283,13 @@ impl<'lt, Tag: 'static> BreadThread<'lt, Tag> {
             .expect("failed to spawn thread");
 
         this
+    }
+}
+
+impl<'lt, Tag: 'static> Drop for BreadThread<'lt, Tag> {
+    fn drop(&mut self) {
+        // decrement the count
+        self.count.fetch_sub(1, SeqCst);
     }
 }
 
@@ -231,13 +371,13 @@ impl<'lt> Directive<'lt> {
 
             // run the op
             let DirectiveOutput {
-                nts,
-                ts,
+                thread_safe_value,
+                thread_unsafe_value,
                 deleted_values,
             } = op(unwrapped);
 
             // wrap the out
-            let ts_out = unsafe { TsOutput::wrap(ts) };
+            let ts_out = unsafe { TsOutput::wrap(thread_unsafe_value) };
 
             // delete any values that were deleted, and add any values that are added
             #[cfg(feature = "fallback")]
@@ -257,7 +397,7 @@ impl<'lt> Directive<'lt> {
             }
 
             // store the output in the return slot
-            input_slot.store((nts, ts_out));
+            input_slot.store((thread_safe_value, ts_out));
         });
 
         (Self { closure }, ret_slot)
@@ -270,51 +410,11 @@ impl<'lt> Directive<'lt> {
 
 pub struct DirectiveOutput<NtsOutput, TsOutput> {
     /// The output value that is thread safe
-    pub nts: NtsOutput,
+    pub thread_safe_value: NtsOutput,
     /// The output value that is thread unsafe
-    pub ts: TsOutput,
+    pub thread_unsafe_value: TsOutput,
     /// The list of values that can be removed from the driver's known values
     pub deleted_values: Vec<usize>,
-}
-
-/// A value that may eventually resolve.
-pub struct Value<T>(Arc<ValueInner<T>>);
-
-struct ValueInner<T> {
-    slot: sync::OnceCell<T>,
-    // TODO: wakers for async
-}
-
-impl<T> Value<T> {
-    fn new() -> Self {
-        Value(Arc::new(ValueInner {
-            slot: sync::OnceCell::new(),
-        }))
-    }
-
-    fn clone(&self) -> Self {
-        Value(self.0.clone())
-    }
-
-    fn store(&self, val: T) {
-        sync::call_once(&self.0.slot, move || val);
-    }
-
-    pub fn is_resolved(&self) -> bool {
-        self.0.slot.get().is_some() && Arc::strong_count(&self.0) == 1
-    }
-
-    pub fn resolve(self) -> Result<T, Value<T>> {
-        // tell if we can resolve yet
-        if self.is_resolved() {
-            let slot = Arc::try_unwrap(self.0)
-                .unwrap_or_else(|_| panic!("Value is still held onto by other task"))
-                .slot;
-            Ok(sync::oc_into_inner(slot).unwrap())
-        } else {
-            Err(self)
-        }
-    }
 }
 
 /// A thread-unsafe object that only has true meaning in the context of a
@@ -339,9 +439,9 @@ unsafe impl<Ty, Tag> Sync for Object<Ty, Tag> {}
 impl<Ty, Tag> Object<Ty, Tag> {
     /// Create a new `Object` without checking to see if
     /// we are on the correct thread.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     pub unsafe fn new_unchecked(object: Ty) -> Self {
@@ -352,9 +452,9 @@ impl<Ty, Tag> Object<Ty, Tag> {
     }
 
     /// Convert to the inner `Object` type.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     pub unsafe fn into_inner_unchecked(self) -> Ty {
@@ -364,9 +464,9 @@ impl<Ty, Tag> Object<Ty, Tag> {
 
 impl<Ty: ?Sized, Tag> Object<Ty, Tag> {
     /// Get a reference to the inner object.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     pub unsafe fn get_unchecked(&self) -> &Ty {
@@ -408,24 +508,24 @@ pub unsafe trait Wrapped<Tag>: Send + Sync + Sized {
     type Unwrapped;
 
     /// Unwrap this object into the inner objects.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     unsafe fn unwrap(self) -> Self::Unwrapped;
     /// Wrap the inner objects into this object.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     unsafe fn wrap(unwrapped: Self::Unwrapped) -> Self;
     /// Run a closure for each value in this set, using the
     /// representative value.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because it assumes that the caller is on the correct
     /// thread.
     unsafe fn for_each_representative<F>(&self, f: F)
