@@ -11,6 +11,7 @@ homepage = "https://github.com/notgull/breadthread#readme"
 [dependencies]
 ahash = { version = "0.7.6", default-features = false, features = ["compile-time-rng"] }
 atomic-waker = { version = "1.0.0", optional = true }
+bytemuck = "1.9.1"
 flume = { version = "0.10.13", optional = true, default-features = false }
 hashbrown = { version = "0.12.1", default-features = false }
 once_cell = { version = "1.12.0", optional = true }
@@ -23,6 +24,5 @@ loom = "0.5"
 
 [features]
 default = ["std"]
-std = ["ahash/std", "flume", "tracing/std"]
+std = ["ahash/std", "flume", "tracing/std", "once_cell"]
 fallback = []
-async = ["atomic-waker"]

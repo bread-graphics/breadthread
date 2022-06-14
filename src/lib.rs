@@ -345,8 +345,7 @@ impl<'lt> Directive<'lt> {
             + 'lt,
     ) -> (Directive<'lt>, Value<(NtsOutput, TsOutput)>) {
         // create two value slots
-        let ret_slot = Value::new();
-        let input_slot = ret_slot.clone();
+        let (ret_slot, in_slot) = Value::new();
 
         let closure = Box::new(move |driver: &mut Driver<'lt>| {
             // first, ensure that, if we're in fallback mode, that we know of all of
@@ -397,7 +396,7 @@ impl<'lt> Directive<'lt> {
             }
 
             // store the output in the return slot
-            input_slot.store((thread_safe_value, ts_out));
+            in_slot.put((thread_safe_value, ts_out));
         });
 
         (Self { closure }, ret_slot)
@@ -491,12 +490,32 @@ pub unsafe trait Compatible {
 
 // SAFETY: copy indicates that this is a bitwise copy, meaning that
 // malicious users can't fudge with the clone impl
-// TODO: is Into<usize> a problem?
-unsafe impl<T: Copy + Into<usize>> Compatible for T {
+unsafe impl<T: Copy + PtrSized> Compatible for T {
     fn representative(&self) -> usize {
-        (*self).into()
+        (*self).into_usize()
     }
 }
+
+/// Helper trait for types that can be converted to a `usize`.
+/// 
+/// Allows one to convert type that's `usize`-sized into a `usize`.
+/// This will panic if this isn't exactly `usize`-sized.
+pub trait PtrSized: bytemuck::NoUninit {}
+
+trait PtrSizedExt: PtrSized {
+    fn into_usize(self) -> usize {
+        if mem::size_of::<Self>() != mem::size_of::<usize>() {
+            panic!("Improper implementation of `PtrSized` for {}", core::any::type_name::<Self>())
+        }
+
+        // SAFETY: nouninit + same size as usize
+        unsafe {
+            mem::transmute_copy(&self)
+        }
+    }
+}
+
+impl<T: PtrSized> PtrSizedExt for T {}
 
 /// Wrap all of the levels of a tuple into `Compatible` types.
 ///
