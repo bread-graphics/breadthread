@@ -59,6 +59,10 @@ mod flume_channel {
         pub(crate) fn recv(&self) -> Result<T, flume::RecvError> {
             self.0.recv()
         }
+
+        pub(crate) fn pending(&self) -> usize {
+            self.0.len()
+        }
     }
 }
 
@@ -161,6 +165,10 @@ mod spin_channel {
                 Some(value) => Ok(value),
                 None => Err(TryRecvError::Empty),
             }
+        }
+
+        pub(crate) fn pending(&self) -> usize {
+            self.0.queue.lock().len()
         }
     }
 }

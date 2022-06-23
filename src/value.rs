@@ -2,7 +2,13 @@
 
 use crate::sync::{self, Mutex};
 use alloc::sync::Arc;
-use core::{cell::UnsafeCell, marker::Unpin, mem::{MaybeUninit, self}, ptr, task::Waker};
+use core::{
+    cell::UnsafeCell,
+    marker::Unpin,
+    mem::{self, MaybeUninit},
+    ptr,
+    task::Waker,
+};
 
 #[cfg(feature = "std")]
 use parking::Unparker;
@@ -13,10 +19,10 @@ use core::{
     task::{Context, Poll},
 };
 
-#[cfg(loom)]
-use loom::sync::atomic::{AtomicBool, Ordering::SeqCst};
 #[cfg(not(loom))]
 use core::sync::atomic::{AtomicBool, Ordering::SeqCst};
+#[cfg(loom)]
+use loom::sync::atomic::{AtomicBool, Ordering::SeqCst};
 
 /// A value that may eventually resolve.
 pub struct Value<T>(Arc<ValueInner<T>>);
@@ -36,9 +42,9 @@ struct ValueInner<T> {
 }
 
 // SAFETY: valid + slot makes up what's essentially a partially
-// atomic `Option<T>`
+// atomic `Option<T>` that never gives out references
 unsafe impl<T: Send> Send for ValueInner<T> {}
-unsafe impl<T: Sync> Sync for ValueInner<T> {}
+unsafe impl<T: Send> Sync for ValueInner<T> {}
 
 enum Waiter {
     None,
@@ -75,9 +81,9 @@ impl<T> Value<T> {
     }
 
     /// Convert to the inner value.
-    /// 
+    ///
     /// # Safety
-    /// 
+    ///
     /// This is unsafe because the value may not be resolved.
     unsafe fn take_inner(&mut self) -> T {
         debug_assert!(self.is_resolved());
@@ -166,10 +172,12 @@ impl Waiter {
         let this = mem::replace(self, other);
 
         match this {
-            Self::None => {},
+            Self::None => {}
             Self::Waker(w) => w.wake(),
             #[cfg(feature = "std")]
-            Self::Unpark(p) => { p.unpark(); },
+            Self::Unpark(p) => {
+                p.unpark();
+            }
         }
     }
 }

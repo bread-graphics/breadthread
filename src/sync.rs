@@ -1,5 +1,15 @@
 // MIT/Apache2 License
 
+#[cfg(not(loom))]
+pub use alloc::sync::Arc;
+#[cfg(not(loom))]
+pub use core::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+#[cfg(loom)]
+pub use loom::sync::{
+    atomic::{AtomicUsize, Ordering::SeqCst},
+    Arc,
+};
+
 #[cfg(feature = "std")]
 mod std_sync {
     pub type Lazy<T> = once_cell::sync::Lazy<T>;
