@@ -1,3 +1,7 @@
+# Deprecated
+
+It was probably a bad idea to use this crate in the first place.
+
 # breadthread
 
 [![Build Status](https://dev.azure.com/jtnunley01/gui-tools/_apis/build/status/notgull.breadthread?branchName=master)](https://dev.azure.com/jtnunley01/gui-tools/_build/latest?definitionId=17&branchName=master) [![crates.io](https://img.shields.io/crates/v/breadthread)](https://crates.io/crates/breadthread) [![docs.rs](https://docs.rs/breadthread/badge.svg)](https://docs.rs/breadthread) 

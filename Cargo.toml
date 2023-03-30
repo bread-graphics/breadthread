@@ -1,6 +1,6 @@
 [package]
 name = "breadthread"
-version = "0.1.3"
+version = "0.1.4"
 authors = ["notgull <jtnunley01@gmail.com>"]
 edition = "2018"
 description = "GUI abstraction; adds a thread controller that helps get some bread"

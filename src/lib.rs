@@ -135,6 +135,7 @@
 //! [`Future`]: std::future::Future
 
 #![no_std]
+#![deprecated = "It is probably a bad idea to use this crate"]
 
 extern crate alloc;
 
